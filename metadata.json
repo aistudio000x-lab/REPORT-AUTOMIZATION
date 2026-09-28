@@ -1,0 +1,6 @@
+{
+  "name": "LexisDraft Ribbon Studio",
+  "description": "Entity document template manager and automated Word (.docx) word scanner and replacement studio across Corporation, Cooperative, Sole Proprietorship, and custom categories.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
