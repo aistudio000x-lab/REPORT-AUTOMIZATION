@@ -182,7 +182,7 @@ export function applyReplacementsToText(
       rule.wholeWord
     );
     if (regex) {
-      result = result.replace(regex, rule.replacementValue);
+      result = result.replace(regex, () => rule.replacementValue);
     }
   }
   return result;
