@@ -44,6 +44,7 @@ import {
 import { DownloadHistoryModal } from './components/DownloadHistoryModal';
 import { DownloadForPcModal } from './components/DownloadForPcModal';
 import { LocalPrinterModal } from './components/LocalPrinterModal';
+import { useOnlineStatus, usePWAInstall } from './hooks/usePWAInstall';
 import {
   Plus,
   Trash2,
@@ -72,6 +73,9 @@ const LEGACY_KEYS_TO_CLEAR = [
 ];
 
 export default function App() {
+  const isOnline = useOnlineStatus();
+  const { isInstalled } = usePWAInstall();
+
   // Purge any legacy pre-seeded localStorage keys on mount
   useEffect(() => {
     try {
@@ -999,6 +1003,54 @@ export default function App() {
     handlePrintTabsByIds([targetTab.id]);
   };
 
+  // Download Windows PC Installer (.bat) that installs Desktop & Start Menu shortcuts and launches standalone PC app window
+  const handleDownloadWindowsInstaller = () => {
+    const appUrl = window.location.origin;
+    const batLines = [
+      '@echo off',
+      'title ReportAutomation PC Desktop App Installer',
+      'echo ========================================================',
+      'echo   Installing ReportAutomation Desktop App on your PC...',
+      'echo ========================================================',
+      'echo.',
+      `set "APP_URL=${appUrl}"`,
+      'set "BROWSER_EXE="',
+      'if exist "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" set "BROWSER_EXE=%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe"',
+      'if exist "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" set "BROWSER_EXE=%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe"',
+      'if "%BROWSER_EXE%"=="" if exist "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" set "BROWSER_EXE=%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe"',
+      'if "%BROWSER_EXE%"=="" if exist "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" set "BROWSER_EXE=%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe"',
+      'if "%BROWSER_EXE%"=="" if exist "%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe" set "BROWSER_EXE=%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe"',
+      '',
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $desktop = [Environment]::GetFolderPath(\'Desktop\'); $startMenu = [Environment]::GetFolderPath(\'Programs\'); foreach ($dir in @($desktop, $startMenu)) { $s = $ws.CreateShortcut((Join-Path $dir \'ReportAutomation.lnk\')); if (\'%BROWSER_EXE%\' -ne \'\') { $s.TargetPath = \'%BROWSER_EXE%\'; $s.Arguments = \'--app=%APP_URL%\'; $s.IconLocation = \'%BROWSER_EXE%,0\'; } else { $s.TargetPath = \'%APP_URL%\'; } $s.Description = \'ReportAutomation Desktop Application\'; $s.Save(); }"',
+      '',
+      'echo.',
+      'echo [OK] Installed ReportAutomation icon on your Windows Desktop and Start Menu!',
+      'echo [OK] Launching ReportAutomation standalone PC window...',
+      'if not "%BROWSER_EXE%"=="" (',
+      '  start "" "%BROWSER_EXE%" --app="%APP_URL%"',
+      ') else (',
+      '  start "" "%APP_URL%"',
+      ')',
+      'timeout /t 3 >nul',
+      'exit',
+    ];
+
+    const batContent = batLines.join('\r\n');
+    const blob = new Blob([batContent], { type: 'application/x-bat' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'Install_ReportAutomation_PC.bat';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    setRecentExportBanner(
+      'Downloaded "Install_ReportAutomation_PC.bat" — Open it to install ReportAutomation on your Windows Desktop & Start Menu.'
+    );
+    setTimeout(() => setRecentExportBanner(null), 6000);
+  };
+
   // Download Desktop App Launcher for Computer (PC)
   const handleDownloadDesktopLauncher = () => {
     const appUrl = window.location.href;
@@ -1189,7 +1241,7 @@ export default function App() {
             className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap cursor-pointer"
           >
             <MonitorDown className="w-3.5 h-3.5" />
-            <span>Download for PC</span>
+            <span>{isInstalled ? 'PC App Options' : 'Download for PC'}</span>
           </button>
 
           <button
@@ -1421,6 +1473,7 @@ export default function App() {
         activeTabTitle={activeSubTab?.title || 'Document'}
         totalTabsCount={subTabs.length}
         onClose={() => setIsDownloadForPcModalOpen(false)}
+        onDownloadWindowsInstaller={handleDownloadWindowsInstaller}
         onDownloadDesktopLauncher={handleDownloadDesktopLauncher}
         onDownloadAllAsZipForPc={handleDownloadAllAsZipForPc}
         onDownloadCurrentDocxToPc={handleExportProcessedDocx}
@@ -1439,6 +1492,13 @@ export default function App() {
         onPrintTabs={handlePrintTabsByIds}
         onDownloadTabs={handleDownloadTabsByIds}
       />
+
+      {!isOnline && (
+        <div className="fixed bottom-4 left-4 z-50 flex items-center gap-2 rounded-lg bg-amber-600 px-3.5 py-2 text-xs font-medium text-white shadow-lg">
+          <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+          <span>Offline Mode — Local workspace data is active.</span>
+        </div>
+      )}
     </div>
   );
 }
