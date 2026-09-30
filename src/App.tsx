@@ -31,8 +31,9 @@ import {
   triggerBlobDownload,
 } from './utils/docxProcessor';
 import {
-  printDocumentsToLocalPrinter,
+  loadActivePrintJobFromStorage,
   PrintableDocumentPayload,
+  saveActivePrintJobToStorage,
 } from './utils/printProcessor';
 import { WordScannerPanel } from './components/WordScannerPanel';
 import { DocumentPaperPreview } from './components/DocumentPaperPreview';
@@ -44,6 +45,7 @@ import {
 import { DownloadHistoryModal } from './components/DownloadHistoryModal';
 import { DownloadForPcModal } from './components/DownloadForPcModal';
 import { LocalPrinterModal } from './components/LocalPrinterModal';
+import { ProcessedDocumentPrintModal } from './components/ProcessedDocumentPrintModal';
 import { useOnlineStatus, usePWAInstall } from './hooks/usePWAInstall';
 import {
   Plus,
@@ -179,6 +181,41 @@ export default function App() {
 
   // PC Local Printer modal state
   const [isLocalPrinterModalOpen, setIsLocalPrinterModalOpen] = useState(false);
+
+  // Opened Processed Document Print Viewer state
+  const [isStandalonePrintRoute] = useState<boolean>(() => {
+    try {
+      return window.location.search.includes('printView=1');
+    } catch {
+      return false;
+    }
+  });
+  const [openedPrintDocuments, setOpenedPrintDocuments] = useState<
+    PrintableDocumentPayload[]
+  >(() => {
+    try {
+      if (window.location.search.includes('printView=1')) {
+        const stored = loadActivePrintJobFromStorage();
+        if (stored && stored.documents.length > 0) {
+          return stored.documents;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return [];
+  });
+  const [isPrintViewerOpen, setIsPrintViewerOpen] = useState<boolean>(() => {
+    try {
+      if (window.location.search.includes('printView=1')) {
+        const stored = loadActivePrintJobFromStorage();
+        return Boolean(stored && stored.documents.length > 0);
+      }
+    } catch {
+      // Ignore
+    }
+    return false;
+  });
 
   // Recent export/print toast banner
   const [recentExportBanner, setRecentExportBanner] = useState<string | null>(
@@ -487,6 +524,7 @@ export default function App() {
       );
 
       printablePayloads.push({
+        tabId: tab.id,
         title: tab.title,
         fileName: exportedFileName,
         paragraphs: tab.paragraphs,
@@ -525,14 +563,17 @@ export default function App() {
       });
     }
 
-    printDocumentsToLocalPrinter(printablePayloads, printerConfig);
+    saveActivePrintJobToStorage(printablePayloads, printerConfig);
+    setIsDefaultsModalOpen(false);
+    setOpenedPrintDocuments(printablePayloads);
+    setIsPrintViewerOpen(true);
     setExportHistory((prev) => [...newHistoryItems, ...prev].slice(0, 50));
     setRecentExportBanner(
-      `Sent ${
+      `Opened ${
         newHistoryItems.length === 1
           ? `"${newHistoryItems[0].exportedFileName}"`
-          : `${newHistoryItems.length} ${categoryObj.label} documents`
-      } to ${printerConfig.printerName} and recorded in History.`
+          : `${newHistoryItems.length} ${categoryObj.label} processed documents`
+      } for printing and recorded in History.`
     );
     setTimeout(() => setRecentExportBanner(null), 5000);
   };
@@ -559,12 +600,13 @@ export default function App() {
         tab.targetWords
       );
       const exportedFileName = buildExportDocxFileName(
-        tab.fileName,
+        tab.fileName || `${tab.title}.docx`,
         refreshedRules,
         fallbackCompany
       );
 
       printablePayloads.push({
+        tabId: tab.id,
         title: tab.title,
         fileName: exportedFileName,
         paragraphs: tab.paragraphs,
@@ -603,16 +645,40 @@ export default function App() {
       });
     }
 
-    printDocumentsToLocalPrinter(printablePayloads, activePrinter);
+    saveActivePrintJobToStorage(printablePayloads, activePrinter);
+    setIsLocalPrinterModalOpen(false);
+    setOpenedPrintDocuments(printablePayloads);
+    setIsPrintViewerOpen(true);
     setExportHistory((prev) => [...newHistoryItems, ...prev].slice(0, 50));
     setRecentExportBanner(
-      `Sent ${
+      `Opened ${
         newHistoryItems.length === 1
           ? `"${newHistoryItems[0].exportedFileName}"`
-          : `${newHistoryItems.length} chosen documents`
-      } to ${activePrinter.printerName} and recorded in History.`
+          : `${newHistoryItems.length} processed documents`
+      } for printing and recorded in History.`
     );
     setTimeout(() => setRecentExportBanner(null), 5000);
+  };
+
+  // Top Ribbon Print button: immediately opens the processed document and prints it
+  const handleRibbonPrintClick = () => {
+    if (activeSubTab && activeSubTab.paragraphs.length > 0) {
+      handlePrintTabsByIds([activeSubTab.id]);
+      return;
+    }
+    const categoryReadyTabs = categorySubTabs.filter(
+      (t) => t.paragraphs.length > 0
+    );
+    if (categoryReadyTabs.length > 0) {
+      handlePrintTabsByIds(categoryReadyTabs.map((t) => t.id));
+      return;
+    }
+    const allReadyTabs = subTabs.filter((t) => t.paragraphs.length > 0);
+    if (allReadyTabs.length > 0) {
+      handlePrintTabsByIds(allReadyTabs.map((t) => t.id));
+      return;
+    }
+    setIsLocalPrinterModalOpen(true);
   };
 
   // Download multiple chosen tab IDs from the Local Printer modal
@@ -1168,13 +1234,17 @@ export default function App() {
   // Handle clicking any Main Category tab in the Ribbon (Corporation, Cooperative, Sole Proprietorship, Others)
   const handleSelectMainCategory = (categoryId: MainCategoryId) => {
     setActiveCategoryId(categoryId);
-    setIsDefaultsModalOpen(true);
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-[#0F172A]">
-      {/* ================= TOP BAR CONTRACT (3 ZONES) ================= */}
-      <header className="flex items-center justify-between px-6 py-3.5 bg-white border-b border-slate-200">
+      <div
+        className={`flex-1 flex flex-col ${
+          isPrintViewerOpen ? 'no-print' : ''
+        }`}
+      >
+        {/* ================= TOP BAR CONTRACT (3 ZONES) ================= */}
+        <header className="flex items-center justify-between px-6 py-3.5 bg-white border-b border-slate-200">
         {/* Zone 1: Single text element Brand Wordmark */}
         <a
           href="#top"
@@ -1228,7 +1298,7 @@ export default function App() {
 
           <button
             type="button"
-            onClick={() => setIsLocalPrinterModalOpen(true)}
+            onClick={handleRibbonPrintClick}
             className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors whitespace-nowrap cursor-pointer"
           >
             <Printer className="w-3.5 h-3.5 text-blue-600" />
@@ -1436,6 +1506,7 @@ export default function App() {
           </div>
         </main>
       )}
+      </div>
 
       {/* ================= ADD SUB-TAB MODAL ================= */}
       <AddSubTabModal
@@ -1491,6 +1562,34 @@ export default function App() {
         onClose={() => setIsLocalPrinterModalOpen(false)}
         onPrintTabs={handlePrintTabsByIds}
         onDownloadTabs={handleDownloadTabsByIds}
+      />
+
+      {/* ================= OPENED PROCESSED DOCUMENT PRINT VIEWER ================= */}
+      <ProcessedDocumentPrintModal
+        isOpen={isPrintViewerOpen}
+        documents={openedPrintDocuments}
+        printerConfig={printerConfig}
+        isStandalonePrintWindow={isStandalonePrintRoute}
+        onClose={() => {
+          setIsPrintViewerOpen(false);
+          if (isStandalonePrintRoute) {
+            window.close();
+          }
+        }}
+        onDownloadProcessedDocx={() => {
+          const ids = openedPrintDocuments
+            .map((d) => d.tabId)
+            .filter((id): id is string => Boolean(id));
+          if (ids.length > 0) {
+            handleDownloadTabsByIds(ids);
+          } else {
+            handleExportProcessedDocx();
+          }
+        }}
+        onOpenPrinterSettings={() => {
+          setIsPrintViewerOpen(false);
+          setIsLocalPrinterModalOpen(true);
+        }}
       />
 
       {!isOnline && (
